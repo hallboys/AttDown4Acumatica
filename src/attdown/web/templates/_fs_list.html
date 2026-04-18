@@ -1,0 +1,49 @@
+<div class="space-y-2">
+  <div class="text-xs font-mono bg-slate-100 p-2 rounded break-all">{{ path }}</div>
+
+  {% if error %}
+    <div class="text-xs text-red-700">{{ error }}</div>
+  {% endif %}
+
+  <div class="max-h-72 overflow-y-auto border rounded divide-y">
+    {% if parent %}
+      <button type="button"
+              hx-get="/api/fs/list" hx-vals='{"path": {{ parent | tojson }}}'
+              hx-target="#fs-body" hx-swap="innerHTML"
+              class="w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 flex items-center gap-2">
+        <span class="text-slate-400">↑</span>
+        <span class="font-mono text-slate-500">..</span>
+      </button>
+    {% endif %}
+
+    {% for e in entries %}
+      <button type="button"
+              hx-get="/api/fs/list" hx-vals='{"path": {{ e|string | tojson }}}'
+              hx-target="#fs-body" hx-swap="innerHTML"
+              class="w-full text-left px-3 py-1.5 text-sm hover:bg-slate-50 flex items-center gap-2">
+        <span class="text-slate-400">📁</span>
+        <span>{{ e.name }}</span>
+      </button>
+    {% else %}
+      <div class="px-3 py-2 text-xs text-slate-400">(no sub-folders)</div>
+    {% endfor %}
+  </div>
+
+  <form class="flex gap-2"
+        hx-get="/api/fs/list" hx-target="#fs-body" hx-swap="innerHTML">
+    <input type="hidden" name="path" value="{{ path }}">
+    <input name="mkdir" placeholder="New subfolder name"
+           class="flex-1 border rounded px-2 py-1 text-xs">
+    <button class="px-3 py-1 text-xs bg-slate-800 text-white rounded">Create</button>
+  </form>
+
+  <div class="flex gap-2 pt-2 border-t">
+    <button type="button"
+            data-use-folder="{{ path }}"
+            class="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded text-sm">
+      Use this folder
+    </button>
+    <button type="button" onclick="closeFsModal()"
+            class="px-3 py-2 rounded border text-sm">Cancel</button>
+  </div>
+</div>

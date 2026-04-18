@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "attdown4acumatica"
+version = "0.1.0"
+description = "AttDown4Acumatica — bulk attachment downloader for Acumatica, over REST"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.11"
+authors = [{ name = "Hall Boys Inc", email = "opensource@hallboys.com" }]
+dependencies = [
+    "httpx>=0.27",
+    "pydantic>=2.6",
+    "pyyaml>=6.0",
+    "typer>=0.12",
+    "rich>=13.7",
+    "tenacity>=8.2",
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
+    "fsspec>=2024.3",
+    "authlib>=1.3",
+    "aiosqlite>=0.20",
+    "itsdangerous>=2.1",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+s3        = ["s3fs>=2024.3"]
+azure     = ["adlfs>=2024.2", "azure-identity>=1.15"]
+gcs       = ["gcsfs>=2024.3"]
+sharepoint = ["msal>=1.28", "requests>=2.31"]
+all       = ["s3fs", "adlfs", "azure-identity", "gcsfs", "msal", "requests"]
+
+[project.scripts]
+attdown = "attdown.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/attdown"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

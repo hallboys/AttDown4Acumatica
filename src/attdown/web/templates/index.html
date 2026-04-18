@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="space-y-6">
+  <div class="bg-white rounded shadow p-6">
+    <div class="flex items-center justify-between">
+      <h2 class="text-lg font-semibold">Entities with attachments</h2>
+      <button
+        class="text-sm px-3 py-1 bg-slate-800 text-white rounded"
+        hx-post="/api/entities/refresh" hx-target="#entities" hx-swap="innerHTML">
+        Refresh
+      </button>
+    </div>
+    <div class="text-xs text-slate-500 mt-1">Endpoint: <code>{{ endpoint }}</code></div>
+    {% if discovery_error %}
+      <div class="mt-4 p-3 rounded bg-red-100 border border-red-300 text-red-800 text-sm">
+        <div class="font-semibold mb-1">Couldn't discover entities</div>
+        <div class="font-mono text-xs break-all">{{ discovery_error }}</div>
+        <div class="mt-2">
+          Check that the <code>ACU_ENDPOINT</code> value (<code>{{ endpoint }}</code>) matches a
+          published Web Service Endpoint in SM207060, and that the logged-in user has access to it.
+        </div>
+      </div>
+    {% endif %}
+    <div id="entities" class="mt-4 grid grid-cols-3 gap-2 text-sm">
+      {% for e in entities %}
+        <a href="/job/new?entity={{ e }}" class="px-3 py-2 bg-slate-100 rounded hover:bg-slate-200">{{ e }}</a>
+      {% else %}
+        {% if not discovery_error %}
+          <span class="text-slate-500 col-span-3">No entities with attachments found yet — click Refresh.</span>
+        {% endif %}
+      {% endfor %}
+    </div>
+    <div class="mt-6">
+      <a href="/job/new" class="inline-block bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">
+        + New download job
+      </a>
+    </div>
+  </div>
+
+
+  {% if runs %}
+  <div class="bg-white rounded shadow p-6">
+    <h2 class="text-lg font-semibold mb-3">Recent runs</h2>
+    <table class="w-full text-sm">
+      <thead class="text-left text-slate-500">
+        <tr><th>ID</th><th>Entity</th><th>Status</th><th>Done</th><th>Failed</th></tr>
+      </thead>
+      <tbody>
+      {% for id, r in runs.items() %}
+        <tr class="border-t">
+          <td><a class="underline" href="/run/{{ id }}">{{ id }}</a></td>
+          <td>{{ r.job.entity }}</td>
+          <td>{{ r.status }}</td>
+          <td>{{ r.progress.files_done }}</td>
+          <td>{{ r.progress.files_failed }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

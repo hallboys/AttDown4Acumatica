@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="bg-white rounded shadow p-6 space-y-4">
+  <div class="flex items-center justify-between">
+    <h2 class="text-lg font-semibold">Run {{ run_id }}</h2>
+    <span id="status" class="text-sm px-3 py-1 rounded bg-slate-100">{{ state.status }}</span>
+  </div>
+
+  <div class="text-sm text-slate-600 space-y-1">
+    <div>Entity: <code>{{ state.job.entity }}</code>
+      {% if state.job.filter %} &nbsp; Filter: <code>{{ state.job.filter }}</code>{% endif %}
+      {% if state.job.match %} &nbsp; Match: <code>{{ state.job.match.field }}</code> ({{ (state.job.match.values or [])|length }} values){% endif %}
+    </div>
+    {% if state.output %}<div>Output: <code>{{ state.output }}</code></div>{% endif %}
+    {% if state.checkpoint %}
+      <div class="text-xs text-slate-500">
+        Checkpoint: <code>{{ state.checkpoint }}</code>
+        <span class="ml-2">— delete this file to reset dedupe state</span>
+      </div>
+    {% endif %}
+  </div>
+
+  <div id="error-box" class="{% if not state.error %}hidden {% endif %}bg-red-100 border border-red-300 text-red-800 rounded p-3 text-sm">
+    <div class="font-semibold mb-1">Run failed</div>
+    <pre id="error-text" class="font-mono text-xs whitespace-pre-wrap break-all">{{ state.error or "" }}</pre>
+  </div>
+
+  <div class="grid grid-cols-6 gap-3 text-center">
+    <div class="bg-slate-100 rounded p-3"><div class="text-xs text-slate-500">Records</div>
+      <div id="m-records" class="text-xl font-semibold">{{ state.progress.total_records }}</div></div>
+    <div class="bg-slate-100 rounded p-3"><div class="text-xs text-slate-500">Files found</div>
+      <div id="m-queued" class="text-xl font-semibold">{{ state.progress.files_queued }}</div></div>
+    <div class="bg-blue-100 rounded p-3"><div class="text-xs text-slate-500">Pending</div>
+      <div id="m-pending" class="text-xl font-semibold">{{ state.progress.files_queued - state.progress.files_done - state.progress.files_skipped - state.progress.files_failed }}</div></div>
+    <div class="bg-green-100 rounded p-3"><div class="text-xs text-slate-500">Done</div>
+      <div id="m-done" class="text-xl font-semibold">{{ state.progress.files_done }}</div></div>
+    <div class="bg-amber-100 rounded p-3"><div class="text-xs text-slate-500">Skipped</div>
+      <div id="m-skipped" class="text-xl font-semibold">{{ state.progress.files_skipped }}</div></div>
+    <div class="bg-red-100 rounded p-3"><div class="text-xs text-slate-500">Failed</div>
+      <div id="m-failed" class="text-xl font-semibold">{{ state.progress.files_failed }}</div></div>
+  </div>
+
+  <div>
+    <div class="text-xs text-slate-500 mb-1">Current file</div>
+    <div id="m-current" class="font-mono text-sm bg-slate-50 rounded p-2 truncate">
+      {{ state.progress.current or "—" }}
+    </div>
+  </div>
+
+  <div>
+    <div class="text-xs text-slate-500 mb-1">Progress</div>
+    <div class="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
+      <div id="m-bar" class="h-2 bg-blue-600" style="width:0%"></div>
+    </div>
+    <div id="m-bytes" class="text-xs text-slate-500 mt-1">0 bytes</div>
+  </div>
+
+  <a href="/" class="inline-block mt-4 text-sm underline">← Back to dashboard</a>
+</div>
+
+<script>
+  const runId = {{ run_id | tojson }};
+  const proto = location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(`${proto}//${location.host}/ws/run/${runId}`);
+
+  function fmtBytes(n) {
+    if (n < 1024) return n + " B";
+    if (n < 1048576) return (n/1024).toFixed(1) + " KB";
+    if (n < 1073741824) return (n/1048576).toFixed(1) + " MB";
+    return (n/1073741824).toFixed(2) + " GB";
+  }
+
+  ws.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.progress) {
+      const p = msg.progress;
+      document.getElementById("m-records").textContent = p.total_records;
+      document.getElementById("m-queued").textContent  = p.files_queued;
+      document.getElementById("m-pending").textContent = Math.max(0, p.files_queued - p.files_done - p.files_skipped - p.files_failed);
+      document.getElementById("m-done").textContent    = p.files_done;
+      document.getElementById("m-skipped").textContent = p.files_skipped;
+      document.getElementById("m-failed").textContent  = p.files_failed;
+      document.getElementById("m-current").textContent = p.current || "—";
+      document.getElementById("m-bytes").textContent   = fmtBytes(p.bytes_done || 0);
+      const pct = p.files_queued ? Math.round(100 * (p.files_done + p.files_skipped + p.files_failed) / p.files_queued) : 0;
+      document.getElementById("m-bar").style.width = pct + "%";
+    }
+    if (msg.status) {
+      document.getElementById("status").textContent = msg.status;
+    }
+    if (msg.error) {
+      document.getElementById("error-box").classList.remove("hidden");
+      document.getElementById("error-text").textContent = msg.error;
+    }
+  };
+</script>
+{% endblock %}

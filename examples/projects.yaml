@@ -1,0 +1,18 @@
+# Active-project attachments. Project is in the stock Default endpoint.
+
+acumatica:
+  base_url: ${ACU_URL}
+  endpoint: Default/24.200.001
+  auth:
+    type: oauth_client_credentials
+    client_id: ${ACU_CLIENT_ID}
+    client_secret: ${ACU_CLIENT_SECRET}
+
+output: ${OUTPUT_URI}
+checkpoint: file:///data/.state.sqlite
+concurrency: 4
+
+jobs:
+  - entity: Project
+    filter: "Status eq 'Active'"
+    path: "projects/{ProjectID}/{filename}"

@@ -1,0 +1,19 @@
+{% if fields %}
+  <div class="text-xs text-slate-500 mb-2">
+    Fields on <code>{{ entity }}</code> — click to insert into the filter.
+  </div>
+  <div class="max-h-64 overflow-y-auto border rounded p-2 bg-slate-50">
+    {% for f in fields %}
+      <button type="button"
+              class="inline-flex items-center gap-1 m-0.5 px-2 py-0.5 text-xs bg-white border rounded hover:bg-blue-50"
+              onclick="insertField('{{ f.name }}')">
+        <span class="font-mono">{{ f.name }}</span>
+        <span class="text-slate-400 font-mono">{{ f.type }}</span>
+      </button>
+    {% endfor %}
+  </div>
+{% else %}
+  <div class="text-xs text-slate-500">
+    No fields found in swagger for <code>{{ entity }}</code>. You can still type a filter manually.
+  </div>
+{% endif %}

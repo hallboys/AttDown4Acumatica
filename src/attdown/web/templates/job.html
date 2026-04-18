@@ -1,0 +1,360 @@
+{% extends "base.html" %}
+{% block body %}
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+  <div class="bg-white rounded shadow p-6 lg:col-span-2">
+    <h2 class="text-lg font-semibold mb-4">New download job</h2>
+
+    <form method="post" action="/job/run" class="space-y-4">
+      <div>
+        <label class="block text-sm font-medium">Entity</label>
+        <select name="entity" id="entity-select" required class="w-full border rounded px-3 py-2"
+                hx-get="/api/fields" hx-trigger="change, load"
+                hx-target="#field-list" hx-include="this">
+          {% for e in entities %}
+            <option value="{{ e }}" {% if request.query_params.get('entity') == e %}selected{% endif %}>{{ e }}</option>
+          {% endfor %}
+        </select>
+        <p class="text-xs text-slate-500 mt-1">
+          Only entities exposing a Files sub-entity are listed.
+          Missing one? Extend the endpoint in SM207060.
+        </p>
+      </div>
+
+      <div class="space-y-4 border rounded p-4 bg-slate-50">
+        <div class="text-sm font-medium">
+          Selection
+          <span class="text-xs font-normal text-slate-500">
+            — fill either or both. If both are set, records must satisfy
+            <code>OData filter</code> <b>AND</b> be in the <code>Match list</code>.
+          </span>
+        </div>
+
+        <!-- OData filter -->
+        <div>
+          <label class="block text-sm font-medium">OData <code>$filter</code> (optional)</label>
+          <input name="filter" id="filter-input"
+                 class="w-full border rounded px-3 py-2 font-mono text-sm"
+                 placeholder="Date ge datetimeoffset'2025-01-01T00:00:00Z'"
+                 oninput="maybeRefreshMatchPreview()">
+          <details class="text-xs text-slate-500 mt-1">
+            <summary class="cursor-pointer">Operator cheatsheet</summary>
+            <div class="mt-2 space-y-1">
+              <div><b>Comparison:</b> <code>eq</code> <code>ne</code> <code>gt</code> <code>ge</code> <code>lt</code> <code>le</code></div>
+              <div><b>Combine:</b> <code>and</code> <code>or</code> <code>not</code></div>
+              <div><b>Substring (case-insensitive):</b> <code>substringof('needle', Field)</code></div>
+              <div><b>Date literal:</b> <code>datetimeoffset'2025-01-01T00:00:00Z'</code></div>
+              <div><b>String literal:</b> single quotes, e.g. <code>Status eq 'Open'</code></div>
+              <div class="text-slate-400 pt-1">
+                Note: Acumatica uses OData v3. Do NOT use <code>contains()</code>, <code>toupper()</code>, <code>tolower()</code>.
+              </div>
+            </div>
+          </details>
+        </div>
+
+        <!-- Match list -->
+        <div class="space-y-2 pt-2 border-t">
+          <label class="block text-sm font-medium">Match list (optional)</label>
+          <div class="grid grid-cols-3 gap-2">
+            <div class="col-span-1">
+              <label class="block text-xs text-slate-500 mb-1">Match field</label>
+              <input name="match_field" id="match-field"
+                     class="w-full border rounded px-2 py-2 font-mono text-sm"
+                     list="match-field-options"
+                     placeholder="Vendor">
+              <datalist id="match-field-options"></datalist>
+            </div>
+            <div class="col-span-2">
+              <label class="block text-xs text-slate-500 mb-1">
+                Values — paste one per line (or separated by comma/tab/semicolon)
+              </label>
+              <textarea name="match_values" id="match-values" rows="5"
+                        class="w-full border rounded px-2 py-2 font-mono text-xs"
+                        placeholder="V0001&#10;V0002&#10;V0003"></textarea>
+            </div>
+          </div>
+          <div class="flex items-center gap-3 text-xs">
+            <label class="inline-flex items-center gap-2 px-3 py-1.5 border rounded cursor-pointer hover:bg-slate-50 bg-white">
+              <span>Upload CSV…</span>
+              <input type="file" accept=".csv,text/csv" class="hidden"
+                     onchange="loadCsv(event)">
+            </label>
+            <button type="button" onclick="previewMatch()"
+                    class="px-3 py-1.5 bg-slate-800 text-white rounded">Preview combined filter</button>
+          </div>
+          <div id="csv-column-picker" class="hidden text-xs space-y-1 border rounded p-2 bg-white">
+            <div>CSV loaded. Pick a column to pull values from:</div>
+            <div id="csv-column-buttons" class="flex flex-wrap gap-1"></div>
+          </div>
+          <div id="match-preview" class="mt-2"></div>
+        </div>
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium">Output destination URI</label>
+        <div class="flex gap-2">
+          <input name="output" id="output-input" required
+                 class="flex-1 border rounded px-3 py-2 font-mono text-sm"
+                 value="{{ default_output }}">
+          {% if fs_browser %}
+            <button type="button" onclick="openFsModal()"
+                    class="px-3 py-2 border rounded text-sm hover:bg-slate-50">Browse…</button>
+          {% endif %}
+        </div>
+        <details class="text-xs text-slate-500 mt-1">
+          <summary class="cursor-pointer">URI formats</summary>
+          <table class="mt-2 w-full text-xs">
+            <tbody class="divide-y">
+              <tr>
+                <td class="py-1 pr-3 font-semibold">Local path</td>
+                <td class="py-1 font-mono">file:///absolute/path/to/folder</td>
+              </tr>
+              <tr>
+                <td class="py-1 pr-3 font-semibold align-top">AWS S3</td>
+                <td class="py-1 font-mono">
+                  s3://bucket-name/optional/prefix<br>
+                  <span class="font-sans text-slate-400">Needs AWS_ACCESS_KEY_ID + AWS_SECRET_ACCESS_KEY (or instance profile).</span>
+                </td>
+              </tr>
+              <tr>
+                <td class="py-1 pr-3 font-semibold align-top">Azure Blob</td>
+                <td class="py-1 font-mono">
+                  az://container-name/optional/prefix<br>
+                  <span class="font-sans text-slate-400">Needs AZURE_STORAGE_CONNECTION_STRING (or managed identity).</span>
+                </td>
+              </tr>
+              <tr>
+                <td class="py-1 pr-3 font-semibold align-top">Google Cloud Storage</td>
+                <td class="py-1 font-mono">
+                  gs://bucket-name/optional/prefix<br>
+                  <span class="font-sans text-slate-400">Needs GOOGLE_APPLICATION_CREDENTIALS.</span>
+                </td>
+              </tr>
+              <tr>
+                <td class="py-1 pr-3 font-semibold align-top">SharePoint</td>
+                <td class="py-1 font-mono">
+                  sharepoint://site-name/Library/Folder<br>
+                  <span class="font-sans text-slate-400">Requires the 'sharepoint' extra + SHAREPOINT_* env. Currently stubbed.</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="mt-2 text-slate-500">
+            <b>Heads-up on <code>file://</code></b> — note <b>three</b> slashes: <code>file://</code> + an absolute path
+            that itself starts with <code>/</code>. The default <code>file:///data</code> is the Docker volume mount
+            path; when running locally, point it at a writable folder on your disk.
+          </p>
+        </details>
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium">Path template</label>
+        <input name="path" class="w-full border rounded px-3 py-2 font-mono text-sm"
+               value="{entity}/{id}/{filename}">
+        <details class="text-xs text-slate-500 mt-1">
+          <summary class="cursor-pointer">
+            Placeholders — click a field on the right to copy its name.
+          </summary>
+          <div class="mt-2 space-y-1">
+            <div>
+              Any top-level entity field, plus <code>{entity}</code> and <code>{filename}</code>.
+              Spaces, parens, and <code>&amp;</code> are preserved. Only characters that
+              Windows/POSIX actually reject (<code>&lt; &gt; : " | ? *</code> and control chars)
+              are replaced with <code>_</code>.
+            </div>
+            <div>
+              <b>Case filters:</b>
+              <code>{VendorName|lower}</code>,
+              <code>{VendorName|upper}</code>,
+              <code>{VendorName|title}</code>,
+              <code>{VendorName|slug}</code> (lowercase with spaces → dashes).
+            </div>
+            <div class="text-slate-400 pt-1">
+              Top-level code fields like <code>{Vendor}</code> usually hold the uppercase ID.
+              For the display name, use a field like <code>{VendorName}</code>
+              (check the field list on the right for what your endpoint exposes).
+            </div>
+          </div>
+        </details>
+      </div>
+
+      <div class="flex items-center gap-4">
+        <div>
+          <label class="block text-sm font-medium">Concurrency</label>
+          <input type="number" name="concurrency" value="4" min="1" max="16" class="border rounded px-3 py-2 w-24">
+        </div>
+        <label class="flex items-center gap-2 text-sm mt-5">
+          <input type="checkbox" name="dry_run" value="true"> Dry run (count + preview only)
+        </label>
+        <label class="flex items-center gap-2 text-sm mt-5">
+          <input type="checkbox" name="force" value="true">
+          Force re-download
+          <span class="text-xs text-slate-500">(ignore previous-run checkpoint)</span>
+        </label>
+      </div>
+
+      <div class="flex gap-3">
+        <button class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded">Start download</button>
+        <a href="/" class="px-4 py-2 rounded border">Cancel</a>
+      </div>
+    </form>
+  </div>
+
+  <aside class="bg-white rounded shadow p-6">
+    <h3 class="text-sm font-semibold mb-2">Available fields</h3>
+    <div id="field-list" class="text-xs text-slate-500">
+      Select an entity to load fields…
+    </div>
+  </aside>
+</div>
+
+<div id="fs-modal"
+     class="hidden fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
+     onclick="if (event.target === this) closeFsModal()">
+  <div class="bg-white rounded shadow-lg w-full max-w-lg p-5">
+    <h3 class="text-lg font-semibold mb-3">Choose a folder</h3>
+    <div id="fs-body" hx-get="/api/fs/list" hx-trigger="load" hx-swap="innerHTML">
+      <div class="text-slate-500 text-sm">Loading…</div>
+    </div>
+  </div>
+</div>
+
+<script>
+  function openFsModal() {
+    const cur = document.getElementById("output-input").value || "";
+    // If the current URI is a file:// path, start the browser there.
+    const m = cur.match(/^file:\/\/(.+)$/);
+    const startPath = m ? m[1] : "";
+    const body = document.getElementById("fs-body");
+    body.innerHTML = '<div class="text-slate-500 text-sm">Loading…</div>';
+    const url = "/api/fs/list" + (startPath ? "?path=" + encodeURIComponent(startPath) : "");
+    htmx.ajax("GET", url, {target: "#fs-body", swap: "innerHTML"});
+    document.getElementById("fs-modal").classList.remove("hidden");
+  }
+  function closeFsModal() {
+    document.getElementById("fs-modal").classList.add("hidden");
+  }
+  function useFolder(path) {
+    document.getElementById("output-input").value = "file://" + path;
+    closeFsModal();
+  }
+
+  // Event delegation — works even after HTMX swaps the fs-body.
+  document.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-use-folder]");
+    if (btn) {
+      e.preventDefault();
+      useFolder(btn.getAttribute("data-use-folder"));
+    }
+  });
+
+  function insertField(name) {
+    const f = document.getElementById("filter-input");
+    const sel = [f.selectionStart, f.selectionEnd];
+    const before = f.value.slice(0, sel[0]);
+    const after  = f.value.slice(sel[1]);
+    // If the cursor isn't on whitespace, add a leading space.
+    const pad = before.length && !/\s$/.test(before) ? " " : "";
+    const insert = pad + name + " ";
+    f.value = before + insert + after;
+    const pos = before.length + insert.length;
+    f.focus();
+    f.setSelectionRange(pos, pos);
+  }
+
+  // -------------------- Match-list mode --------------------
+
+  function maybeRefreshMatchPreview() {
+    // If the user already has a match list, refresh the preview when the OData filter changes.
+    if (document.getElementById("match-values").value.trim()) {
+      previewMatch();
+    }
+  }
+
+  // When the field-list partial loads, mirror the field names into the match datalist.
+  document.addEventListener("htmx:afterSwap", (ev) => {
+    if (ev.detail.target && ev.detail.target.id === "field-list") {
+      const dl = document.getElementById("match-field-options");
+      if (!dl) return;
+      dl.innerHTML = "";
+      document.querySelectorAll("#field-list button[onclick^='insertField']").forEach(btn => {
+        const name = btn.querySelector(".font-mono")?.textContent?.trim();
+        if (!name) return;
+        const opt = document.createElement("option");
+        opt.value = name;
+        dl.appendChild(opt);
+      });
+    }
+  });
+
+  async function previewMatch() {
+    const form = new FormData();
+    form.append("match_field", document.getElementById("match-field").value);
+    form.append("match_values", document.getElementById("match-values").value);
+    form.append("filter", document.getElementById("filter-input").value);
+    const target = document.getElementById("match-preview");
+    target.innerHTML = '<div class="text-xs text-slate-500">Loading preview…</div>';
+    const resp = await fetch("/api/match/preview", { method: "POST", body: form });
+    target.innerHTML = await resp.text();
+  }
+
+  // Lightweight CSV parser: handles quoted cells, embedded commas, and escaped quotes.
+  function parseCsv(text) {
+    const rows = [];
+    let row = [];
+    let cur = "";
+    let quoted = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (quoted) {
+        if (c === '"' && text[i + 1] === '"') { cur += '"'; i++; }
+        else if (c === '"') quoted = false;
+        else cur += c;
+      } else {
+        if (c === '"') quoted = true;
+        else if (c === ",") { row.push(cur); cur = ""; }
+        else if (c === "\n" || c === "\r") {
+          if (cur !== "" || row.length) { row.push(cur); rows.push(row); }
+          row = []; cur = "";
+          if (c === "\r" && text[i + 1] === "\n") i++;
+        }
+        else cur += c;
+      }
+    }
+    if (cur !== "" || row.length) { row.push(cur); rows.push(row); }
+    return rows;
+  }
+
+  function loadCsv(ev) {
+    const file = ev.target.files && ev.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const rows = parseCsv(e.target.result);
+      if (!rows.length) return;
+      window._csvRows = rows;
+      const header = rows[0];
+      const picker = document.getElementById("csv-column-picker");
+      const buttons = document.getElementById("csv-column-buttons");
+      buttons.innerHTML = "";
+      header.forEach((col, idx) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "px-2 py-0.5 bg-white border rounded hover:bg-blue-50 font-mono text-xs";
+        btn.textContent = (col || "(col " + idx + ")") + " — " + (rows.length - 1) + " rows";
+        btn.onclick = () => fillFromCsvColumn(idx);
+        buttons.appendChild(btn);
+      });
+      picker.classList.remove("hidden");
+    };
+    reader.readAsText(file);
+  }
+
+  function fillFromCsvColumn(idx) {
+    const rows = window._csvRows || [];
+    const vals = rows.slice(1).map(r => (r[idx] ?? "").trim()).filter(v => v.length);
+    document.getElementById("match-values").value = vals.join("\n");
+    document.getElementById("csv-column-picker").classList.add("hidden");
+    previewMatch();
+  }
+</script>
+{% endblock %}

@@ -1,0 +1,11 @@
+services:
+  attdown:
+    build: .
+    image: attdown4acumatica:latest
+    ports:
+      - "8080:8080"
+    env_file: .env
+    volumes:
+      - ./data:/data
+      - ./config.yaml:/app/config.yaml:ro
+    restart: unless-stopped

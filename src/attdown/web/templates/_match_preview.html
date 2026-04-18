@@ -1,0 +1,41 @@
+{% if not field %}
+  <div class="text-xs text-amber-700">Pick a match field first.</div>
+{% elif unique_count == 0 %}
+  <div class="text-xs text-slate-500">No values yet. Paste keys in the textarea above.</div>
+{% else %}
+  <div class="text-xs space-y-2">
+    <div class="grid grid-cols-3 gap-2">
+      <div class="bg-slate-100 rounded p-2">
+        <div class="text-slate-500">Values given</div>
+        <div class="text-lg font-semibold">{{ total }}</div>
+      </div>
+      <div class="bg-slate-100 rounded p-2">
+        <div class="text-slate-500">After dedupe</div>
+        <div class="text-lg font-semibold">{{ unique_count }}</div>
+      </div>
+      <div class="bg-slate-100 rounded p-2">
+        <div class="text-slate-500">Acumatica calls</div>
+        <div class="text-lg font-semibold">{{ chunk_count }}</div>
+        <div class="text-slate-400">({{ chunk_size }} values per call)</div>
+      </div>
+    </div>
+
+    {% if sample %}
+      <div>
+        <div class="text-slate-500 mb-1">First {{ sample|length }} values:</div>
+        <div class="flex flex-wrap gap-1">
+          {% for v in sample %}
+            <span class="font-mono px-1.5 py-0.5 bg-white border rounded">{{ v }}</span>
+          {% endfor %}
+        </div>
+      </div>
+    {% endif %}
+
+    {% if sample_filter %}
+      <div>
+        <div class="text-slate-500 mb-1">Example generated OData filter:</div>
+        <code class="block bg-slate-50 border rounded p-2 text-xs whitespace-pre-wrap break-all">{{ sample_filter }}</code>
+      </div>
+    {% endif %}
+  </div>
+{% endif %}
