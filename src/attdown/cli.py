@@ -86,9 +86,24 @@ def entities(
 def serve(
     host: str = typer.Option("0.0.0.0", "--host"),
     port: int = typer.Option(8080, "--port"),
+    open_browser: bool = typer.Option(True, "--open-browser/--no-open-browser"),
 ) -> None:
     """Launch the web UI."""
+    import threading
+    import time
     import uvicorn
+    import webbrowser
+
+    if open_browser:
+        # Delay slightly so uvicorn has bound the socket before the browser hits it.
+        # 'localhost' works regardless of whether host is 0.0.0.0 or 127.0.0.1.
+        def _open() -> None:
+            time.sleep(1.2)
+            try:
+                webbrowser.open(f"http://localhost:{port}/")
+            except Exception:
+                pass
+        threading.Thread(target=_open, daemon=True).start()
 
     uvicorn.run("attdown.web.app:app", host=host, port=port, reload=False)
 

@@ -22,6 +22,18 @@ Acumatica's UI lets you view attachments one record at a time. Auditors, complia
 - **Path templates** — `{entity}/{Vendor}/{ReferenceNbr}/{filename}` with case filters: `|lower`, `|upper`, `|title`, `|slug`.
 - **Concurrent** — parallel downloads with a configurable semaphore; throttles to your Acumatica concurrent-request license.
 
+## Install
+
+### Prebuilt binary (recommended)
+
+Download your platform's binary from the [Releases](https://github.com/hallboys/AttDown4Acumatica/releases) page — macOS arm64/x64, Windows x64, or Linux x64. No Python needed. See [docs/install.md](docs/install.md) for Gatekeeper/SmartScreen notes and per-OS details.
+
+### Docker or Python
+
+Pick whichever fits. See the [developer setup](#run-locally) below or the [full install guide](docs/install.md).
+
+---
+
 ## Quick start
 
 ### Prereqs (on your tenant)
@@ -36,8 +48,8 @@ Acumatica's UI lets you view attachments one record at a time. Auditors, complia
 ### Run locally
 
 ```bash
-git clone https://github.com/hallboys/attdown4acumatica.git
-cd attdown4acumatica
+git clone https://github.com/hallboys/AttDown4Acumatica.git
+cd AttDown4Acumatica
 
 python3.12 -m venv .venv
 source .venv/bin/activate
