@@ -7,7 +7,7 @@ from attdown.downloader import _render_path, _sanitize
 
 
 def test_sanitize():
-    assert _sanitize("ACME / Co.") == "ACME_-_Co"
+    assert _sanitize("ACME / Co.") == "ACME - Co"
     assert _sanitize("path\\sep") == "path-sep"
 
 
