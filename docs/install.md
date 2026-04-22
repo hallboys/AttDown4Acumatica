@@ -11,9 +11,10 @@ Download the binary for your OS from the [Releases](https://github.com/hallboys/
 | OS | File |
 |---|---|
 | macOS (Apple Silicon) | `attdown-macos-arm64` |
-| macOS (Intel) | `attdown-macos-x64` |
-| Windows | `attdown-windows-x64.exe` |
-| Linux | `attdown-linux-x64` |
+| Windows x64 | `attdown-windows-x64.exe` |
+| Linux x64 | `attdown-linux-x64` |
+
+> macOS Intel: run `attdown-macos-arm64` under Rosetta. A dedicated `attdown-macos-x64` binary was dropped in v0.2.0 because `macos-13` GitHub Actions runners are being decommissioned.
 
 ### Before you run
 
@@ -21,21 +22,27 @@ Download the binary for your OS from the [Releases](https://github.com/hallboys/
    - OAuth 2.0 Flow: **Authorization Code**
    - Redirect URI: `http://localhost:8080/oauth/callback`
    - Copy the client ID (and secret if you set one).
-2. Create an `.env` file next to the binary:
+2. Generate a `SESSION_SECRET`:
+   ```bash
+   ./attdown-macos-arm64 gen-secret
+   # prints: SESSION_SECRET=<long random string>
+   ```
+   Use the filename matching your download (`attdown-linux-x64`, `attdown-windows-x64.exe`, etc.). Pin this value — rotating it logs every user out.
+3. Create an `.env` file in the **same folder as the binary** (that's where `attdown` reads it from by default; override with `ATTDOWN_ENV_FILE=/abs/path/.env`):
    ```bash
    ACU_URL=https://your-tenant.acumatica.com
    ACU_ENDPOINT=Default/24.200.001
    ACU_CLIENT_ID=...
    ACU_CLIENT_SECRET=...
    ACU_REDIRECT_URI=http://localhost:8080/oauth/callback
-   SESSION_SECRET=<run: python3 -c 'import secrets; print(secrets.token_urlsafe(48))' or generate any long random string>
+   SESSION_SECRET=<paste the line from gen-secret>
    ```
 
 ### macOS
 
 ```bash
 # One-time permission grant (see "Gatekeeper" note below)
-xattr -d com.apple.quarantine attdown-macos-arm64   # or attdown-macos-x64
+xattr -d com.apple.quarantine attdown-macos-arm64
 chmod +x attdown-macos-arm64
 
 ./attdown-macos-arm64 serve

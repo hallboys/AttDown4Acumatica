@@ -41,26 +41,103 @@ If you need fully unattended / multi-user, use the **CLI** (`attdown run --confi
 
 ### Prebuilt binary (recommended)
 
-Download your platform's binary from the [Releases](https://github.com/hallboys/AttDown4Acumatica/releases) page — macOS arm64/x64, Windows x64, or Linux x64. No Python needed. See [docs/install.md](docs/install.md) for Gatekeeper/SmartScreen notes and per-OS details.
+Download your platform's binary from the [Releases](https://github.com/hallboys/AttDown4Acumatica/releases) page — macOS arm64, Windows x64, or Linux x64. No Python needed. See [docs/install.md](docs/install.md) for Gatekeeper/SmartScreen notes and per-OS details.
+
+Release binaries are platform-tagged. The filename tells you which one to download:
+
+| Platform | Filename |
+|---|---|
+| macOS (Apple Silicon / Rosetta) | `attdown-macos-arm64` |
+| Linux x86_64 | `attdown-linux-x64` |
+| Windows x64 | `attdown-windows-x64.exe` |
+
+Examples below use `./attdown-macos-arm64`; substitute whichever one you downloaded.
 
 ### Docker or Python
 
-Pick whichever fits. See the [developer setup](#run-locally) below or the [full install guide](docs/install.md).
+Pick whichever fits. See the [advanced setup](#advanced-run-from-source) below or the [full install guide](docs/install.md).
 
 ---
 
 ## Quick start
 
-### Prereqs (on your tenant)
+### 1. Prereqs on your Acumatica tenant (once)
 
-1. In Acumatica: **Integration → Connected Applications (SM303010)** →
+1. **Integration → Connected Applications (SM303010)** →
    - Create a Connected Application.
    - **Flow: Authorization Code.**
-   - **Redirect URI:** `http://localhost:8080/oauth/callback` (or whatever you plan to serve on).
-   - Save the client ID (and secret if you set one).
-2. **Extend the endpoint** if you need entities not in stock Default (e.g. `ComplianceDocument`). See [endpoint-extensions/ComplianceDocument.md](endpoint-extensions/ComplianceDocument.md). For AP/AR/Projects/Sales/etc., stock Default works.
+   - **Redirect URI:** `http://localhost:8080/oauth/callback`.
+   - Save the client ID (and secret, if you set one).
+2. (Only if you need entities beyond stock Default, e.g. `ComplianceDocument`) **Extend the endpoint** — see [endpoint-extensions/ComplianceDocument.md](endpoint-extensions/ComplianceDocument.md). For AP/AR/Projects/Sales/etc., stock Default works out of the box.
 
-### Run locally
+### 2. Binary — the non-technical path (recommended)
+
+No Python, no Docker, no git. Pick your platform below; the binary name includes OS+arch.
+
+**macOS (Apple Silicon):**
+```bash
+# 1. Download attdown-macos-arm64 from the Releases page into, say, ~/attdown/
+cd ~/attdown
+
+# 2. macOS quarantines unsigned downloads — strip the flag once:
+xattr -d com.apple.quarantine ./attdown-macos-arm64
+chmod +x ./attdown-macos-arm64
+
+# 3. Generate a SESSION_SECRET:
+./attdown-macos-arm64 gen-secret
+# → prints: SESSION_SECRET=<random-long-string>
+
+# 4. Create .env in the SAME folder as the binary:
+cat > .env <<EOF
+ACU_URL=https://your-tenant.acumatica.com
+ACU_CLIENT_ID=<paste from SM303010>
+ACU_CLIENT_SECRET=<paste from SM303010, or leave blank for PKCE public client>
+ACU_REDIRECT_URI=http://localhost:8080/oauth/callback
+SESSION_SECRET=<paste the line printed by gen-secret>
+EOF
+
+# 5. Start the server:
+./attdown-macos-arm64 serve
+# Your browser opens http://localhost:8080 → log in through Acumatica → ready.
+```
+
+**Linux x64:** same as macOS, but skip step 2 (`xattr`) — it's a macOS-only step. Use `./attdown-linux-x64` in every command.
+
+**Windows x64:** open PowerShell in the folder you put `attdown-windows-x64.exe` in.
+```powershell
+# 1. Generate a SESSION_SECRET:
+.\attdown-windows-x64.exe gen-secret
+# → prints: SESSION_SECRET=<random-long-string>
+
+# 2. Create .env in the same folder (Notepad works, or:):
+@"
+ACU_URL=https://your-tenant.acumatica.com
+ACU_CLIENT_ID=<paste from SM303010>
+ACU_CLIENT_SECRET=<paste from SM303010, or leave blank for PKCE>
+ACU_REDIRECT_URI=http://localhost:8080/oauth/callback
+SESSION_SECRET=<paste the line from gen-secret>
+"@ | Out-File -Encoding utf8 .env
+
+# 3. Start:
+.\attdown-windows-x64.exe serve
+```
+If SmartScreen warns about an unrecognized publisher, click **More info → Run anyway** (the binary is unsigned; notarization/codesigning is on the roadmap).
+
+> **Where does `.env` live?** By default `attdown` reads `.env` from the **current working directory** — so the simplest setup is to put the binary and `.env` in the same folder and run from there. If you'd rather keep `.env` elsewhere (e.g. `~/.attdown/.env`), set the `ATTDOWN_ENV_FILE` env var to its absolute path before running.
+
+### 3. Advanced: Docker (no Python on host)
+
+```bash
+git clone https://github.com/hallboys/AttDown4Acumatica.git
+cd AttDown4Acumatica
+cp .env.example .env                          # edit as in step 2 above
+docker compose up
+# UI on http://localhost:8080; downloads land in ./data
+```
+
+### 4. Advanced: run from source
+
+Use this if you're contributing, debugging, or want the bleeding-edge `main`:
 
 ```bash
 git clone https://github.com/hallboys/AttDown4Acumatica.git
@@ -71,26 +148,15 @@ source .venv/bin/activate
 pip install -e ".[all]"
 
 cp .env.example .env
-# fill in:
-#   ACU_URL=https://your-tenant.acumatica.com
-#   ACU_CLIENT_ID=...
-#   ACU_CLIENT_SECRET=...   (optional if your Connected App is a PKCE public client)
-#   ACU_REDIRECT_URI=http://localhost:8080/oauth/callback
-#   SESSION_SECRET=$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')
+# Fill in ACU_URL, ACU_CLIENT_ID, ACU_CLIENT_SECRET, ACU_REDIRECT_URI.
+# For SESSION_SECRET:
+attdown gen-secret   # or: python3 -c 'import secrets; print(secrets.token_urlsafe(48))'
+# paste the line into .env
 
 attdown serve
-# open http://localhost:8080 → log in through Acumatica → done.
 ```
 
-### Run via Docker (no Python on host)
-
-```bash
-cp .env.example .env                          # edit as above
-docker compose up
-# UI on http://localhost:8080; downloads land in ./data
-```
-
-### Run headless (cron / ACA Job / ECS)
+### 5. Advanced: run headless (cron / ACA Job / ECS)
 
 Use OAuth **Client Credentials** in `config.yaml` — a proxy-user service identity, no human in the loop:
 
@@ -122,11 +188,14 @@ attdown run --config config.yaml --job Bill
 
 ```
 attdown serve [--host 0.0.0.0] [--port 8080]   # Web UI
+attdown gen-secret                              # Print a fresh SESSION_SECRET= line
 attdown run --config config.yaml                # Run all jobs
 attdown run --config config.yaml --dry-run      # Plan, don't download
 attdown run --config config.yaml --job Bill     # Only one job
 attdown entities --config config.yaml           # List entities with Files
 ```
+
+On binary installs, replace `attdown` with the filename you downloaded (e.g. `./attdown-macos-arm64`, `./attdown-linux-x64`, or `.\attdown-windows-x64.exe`).
 
 ## Destinations (output URI)
 

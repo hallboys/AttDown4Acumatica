@@ -61,6 +61,18 @@ app = typer.Typer(
 console = Console()
 
 
+@app.command("gen-secret")
+def gen_secret() -> None:
+    """Print a random SESSION_SECRET suitable for pasting into .env.
+
+    The web UI refuses to start without SESSION_SECRET set. Run this once,
+    copy the line into your .env file, and keep it stable across restarts
+    (rotating it logs every user out).
+    """
+    import secrets as _secrets
+    typer.echo(f"SESSION_SECRET={_secrets.token_urlsafe(48)}")
+
+
 @app.command()
 def run(
     config: Path = typer.Option(..., "--config", "-c", exists=True),
