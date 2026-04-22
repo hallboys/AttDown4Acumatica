@@ -14,6 +14,20 @@ Two runtimes over a shared core:
 - **Web UI** — `attdown serve`, FastAPI + HTMX + Tailwind. OAuth-gated via
   Acumatica itself; no separate app password.
 
+### Intended deployment: local-first
+
+The web UI is designed to be run on a user's workstation, **not** on a shared
+server. The README "This is a local web server" section is the product-facing
+statement of this; concretely it means:
+
+- OAuth `redirect_uri` is `http://localhost:8080/oauth/callback`, registered
+  as a per-user Connected App in SM303010.
+- Session/CSRF hardening (30-min idle, per-session token, run ownership)
+  assume a single-operator box. Multi-user shared-host deployments would
+  need SSO/WAF/mTLS in front, which is out of scope.
+- Headless / multi-user automation uses the CLI with client-credentials, not
+  the web UI.
+
 ## Architecture
 
 ```
@@ -79,6 +93,38 @@ Token endpoints: `{base}/identity/connect/{authorize,token,userinfo,revocation}`
 - If a base `filter` is set, each chunk becomes `(chunk) and (base)`.
 - Downloader dedupes records across chunks via `seen_record_keys`.
 
+### Web UI security posture (landed in v0.2.0)
+
+These live in `src/attdown/web/app.py`. Don't regress them.
+
+- **`SESSION_SECRET` is required.** No silent-random fallback — the server raises
+  at import if it's unset. Rationale: a volatile secret rotates on every
+  restart, invalidating live sessions and breaking the idle-timeout story.
+- **30-minute sliding idle timeout.** Enforced two ways:
+  1. `SessionMiddleware(..., max_age=IDLE_SECONDS)` — cookie re-issued on each
+     response where the session is mutated.
+  2. `require_auth` writes `last_activity` on every hit and clears the session
+     if the delta exceeds `IDLE_SECONDS`. The WebSocket `/ws/run/{id}` mirrors
+     this check so long-lived connections can't outlive the HTTP session.
+- **Run ownership.** `RunState.user` is compared against `session["username"]`
+  on `GET /run/{id}` (404 on mismatch), on `/ws/run/{id}` (close 4404), and
+  when rendering the dashboard (runs list is filtered to the current user).
+  Without this, any logged-in user could read any other user's filter, filenames,
+  and Acumatica error bodies.
+- **CSRF double-submit token.** Per-session token stored in `session["csrf"]`
+  (minted by `_csrf_token()`), validated by the `require_csrf` dependency on:
+  - `POST /job/run`
+  - `POST /api/match/preview`
+  - `POST /api/entities/refresh`
+  - `POST /api/fs/mkdir` (split out of the old `GET /api/fs/list?mkdir=...`
+    exactly so GET is never state-changing)
+
+  The token is delivered two ways: the `<body hx-headers='{"X-CSRF-Token":...}'>`
+  attribute in `base.html` makes every HTMX request carry it; regular form
+  POSTs include a hidden `_csrf` input.
+- **GET is safe.** Don't add filesystem mutation, Acumatica mutation, or any
+  state change to a GET handler. If you need side-effects, use POST + CSRF.
+
 ## Acumatica quirks — already landed
 
 Write them down when you hit them. These are the gotchas I keep forgetting.
@@ -124,7 +170,7 @@ Users need to configure these *in Acumatica*:
 | `ACU_CLIENT_ID` | Connected App ID |
 | `ACU_CLIENT_SECRET` | Connected App secret (optional if PKCE public client) |
 | `ACU_REDIRECT_URI` | OAuth callback, must match SM303010 |
-| `SESSION_SECRET` | Signs the session cookie; generate with `python -c 'import secrets; print(secrets.token_urlsafe(48))'` |
+| `SESSION_SECRET` | Signs the session cookie. **Required** — web server refuses to boot without it. Generate with `python -c 'import secrets; print(secrets.token_urlsafe(48))'` |
 | `OUTPUT_URI` | Default download destination (overridden by job form) |
 | `CHECKPOINT_URI` | SQLite path; defaults next to `file://` output or `~/.attdown/state.sqlite` |
 | `ATTDOWN_FS_BROWSER` | `off` disables the folder picker (remote deploys) |
@@ -182,7 +228,15 @@ uvicorn attdown.web.app:app --reload --host 127.0.0.1 --port 8080
   either half.
 - **Checkpoint table schema** — changing it breaks resume for existing users.
 - **OAuth session cookie key names** (`tokens`, `oauth_state`, `code_verifier`,
-  `username`) — any rename invalidates live sessions.
+  `username`, `last_activity`, `csrf`) — any rename invalidates live sessions.
+- **`SESSION_SECRET` required-at-import** — do not restore the
+  `secrets.token_urlsafe(32)` silent-random fallback; it rotates on every
+  restart and breaks the idle-timeout/CSRF stories.
+- **Run ownership checks** in `run_page`, `run_ws`, and the dashboard's
+  `my_runs` filter — removing any one of the three is a cross-user data leak.
+- **CSRF dependency** on `/job/run`, `/api/match/preview`,
+  `/api/entities/refresh`, `/api/fs/mkdir` — if you add a new state-changing
+  POST, add `_csrf: None = Depends(require_csrf)` to it.
 
 ## Known limitations / future work
 

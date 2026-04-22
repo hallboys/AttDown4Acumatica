@@ -4,6 +4,21 @@
 
 Acumatica's UI lets you view attachments one record at a time. Auditors, compliance teams, and anyone doing an annual document pull want them in bulk. AttDown4Acumatica walks any contract-based REST entity that exposes `Files`, pages through matching records, and streams the attachments to local disk, S3, Azure Blob, GCS, or (stubbed) SharePoint.
 
+## This is a local web server — run it on your own workstation
+
+`attdown serve` starts a **local FastAPI server** bound to `http://localhost:8080`. Open it in your own browser, log into your Acumatica tenant through the OAuth redirect, and the server running on your laptop streams attachments straight from Acumatica to your chosen destination. **The web UI is designed to be run locally, not deployed to a shared host.** We strongly recommend against hosting it on a public server for anything other than a single-tenant, single-user internal deployment behind your VPN.
+
+Why local-first:
+
+- **Data sensitivity.** Attachments are invoices, vendor W-9s, subcontractor compliance docs, signed contracts — often PII or SOX/regulated material. Keeping the fetch-and-save pipeline entirely on your workstation means none of that content ever transits a third-party intermediary host. Your Acumatica tenant → your laptop → your sink.
+- **OAuth redirect URIs are per Connected App.** `ACU_REDIRECT_URI` must match a URI registered in **Acumatica → SM303010** exactly. `http://localhost:8080/oauth/callback` keeps the setup trivial and per-user. Shared-host deploys need a proper HTTPS domain registered in SM303010 and a plan for cookies, which is a lot of complexity to take on for a bulk-export tool.
+- **CORS.** A browser-only SPA talking directly to Acumatica would need the tenant admin to whitelist your UI origin. The local server is a same-origin proxy — no CORS config on the tenant, no blocked preflights.
+- **Concurrent-session license cap.** Acumatica caps concurrent logins per user. Running the UI locally means your human session is *your* session; it doesn't contend with other UI users or with the headless CLI (which uses a dedicated client-credentials proxy user).
+- **Cloud destination credentials.** If you export to S3 / Azure / GCS, the bucket creds live in `.env` on your machine — never uploaded, never shared. Same for `SESSION_SECRET`.
+- **Session hygiene.** The UI enforces a 30-minute idle timeout and scopes job runs per-user; these are meaningful on your own workstation. On a shared multi-tenant host you'd want significantly more than that (mTLS, SSO in front, a WAF), which is out of scope here.
+
+If you need fully unattended / multi-user, use the **CLI** (`attdown run --config ...`) with OAuth Client Credentials — that path is designed for cron, Azure Container Apps Jobs, ECS, etc.
+
 > Copyright 2026 Hall Boys Inc. Apache-2.0 licensed. Contributions welcome.
 
 ## Features
@@ -196,7 +211,7 @@ For remote deployments, disable the filesystem browser with `ATTDOWN_FS_BROWSER=
 | `ACU_CLIENT_ID` | Connected App ID | — (required for UI) |
 | `ACU_CLIENT_SECRET` | Connected App secret | — |
 | `ACU_REDIRECT_URI` | OAuth callback | `http://localhost:8080/oauth/callback` |
-| `SESSION_SECRET` | Signs the UI session cookie | random (regenerated each start — set this!) |
+| `SESSION_SECRET` | Signs the UI session cookie | — (**required**; server refuses to start without it) |
 | `OUTPUT_URI` | Default download destination | `file://~/Downloads/attdown` |
 | `CHECKPOINT_URI` | SQLite path | auto |
 | `ATTDOWN_FS_BROWSER` | `off` hides folder picker | `on` |
