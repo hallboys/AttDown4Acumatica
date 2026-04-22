@@ -5,6 +5,7 @@
     <h2 class="text-lg font-semibold mb-4">New download job</h2>
 
     <form method="post" action="/job/run" class="space-y-4">
+      <input type="hidden" name="_csrf" value="{{ csrf_token }}">
       <div>
         <label class="block text-sm font-medium">Entity</label>
         <select name="entity" id="entity-select" required class="w-full border rounded px-3 py-2"
@@ -293,7 +294,11 @@
     form.append("filter", document.getElementById("filter-input").value);
     const target = document.getElementById("match-preview");
     target.innerHTML = '<div class="text-xs text-slate-500">Loading preview…</div>';
-    const resp = await fetch("/api/match/preview", { method: "POST", body: form });
+    const resp = await fetch("/api/match/preview", {
+      method: "POST",
+      body: form,
+      headers: { "X-CSRF-Token": {{ csrf_token | tojson }} },
+    });
     target.innerHTML = await resp.text();
   }
 

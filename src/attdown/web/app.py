@@ -46,12 +46,25 @@ from attdown.sinks import Sink
 BASE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(BASE / "templates"))
 
+# Idle timeout for authenticated sessions. Cookie re-issued each request so the
+# window is sliding, and require_auth also enforces it server-side against the
+# stored last_activity timestamp.
+IDLE_SECONDS = 30 * 60
+
+_SESSION_SECRET = os.environ.get("SESSION_SECRET")
+if not _SESSION_SECRET:
+    raise RuntimeError(
+        "SESSION_SECRET must be set. Generate one with: "
+        "python -c 'import secrets; print(secrets.token_urlsafe(48))'"
+    )
+
 app = FastAPI(title="AttDown4Acumatica")
 app.add_middleware(
     SessionMiddleware,
-    secret_key=os.environ.get("SESSION_SECRET", secrets.token_urlsafe(32)),
+    secret_key=_SESSION_SECRET,
     same_site="lax",
     https_only=os.environ.get("HTTPS_ONLY", "false").lower() == "true",
+    max_age=IDLE_SECONDS,
 )
 
 
@@ -114,7 +127,44 @@ def _auther_from_session(request: Request) -> AuthorizationCodeAuth:
     return auther
 
 
+def _csrf_token(request: Request) -> str:
+    """Fetch (or mint) the per-session CSRF token. Stable for the session's life."""
+    tok = request.session.get("csrf")
+    if not tok:
+        tok = secrets.token_urlsafe(32)
+        request.session["csrf"] = tok
+    return tok
+
+
+async def require_csrf(request: Request) -> None:
+    """Validate a double-submit CSRF token on state-changing requests.
+    Accepts the token via the `X-CSRF-Token` header (HTMX/fetch) or `_csrf`
+    form field. Uses a constant-time compare against the session-bound token.
+    """
+    expected = request.session.get("csrf")
+    header = request.headers.get("x-csrf-token", "")
+    form_token = ""
+    if not header:
+        ctype = request.headers.get("content-type", "")
+        if ctype.startswith("application/x-www-form-urlencoded") or ctype.startswith("multipart/form-data"):
+            form = await request.form()
+            form_token = str(form.get("_csrf", ""))
+    presented = header or form_token
+    if not expected or not presented or not secrets.compare_digest(expected, presented):
+        raise HTTPException(status_code=403, detail="CSRF token missing or invalid.")
+
+
 async def require_auth(request: Request) -> AuthorizationCodeAuth:
+    # Enforce the 30-minute sliding idle window. The SessionMiddleware max_age
+    # re-issues the cookie on each response where the session is mutated, and
+    # touching last_activity here guarantees that mutation on every auth'd hit.
+    now = time.time()
+    last = request.session.get("last_activity")
+    if last is not None and now - float(last) > IDLE_SECONDS:
+        request.session.clear()
+        raise NotAuthenticated()
+    request.session["last_activity"] = now
+
     auther = _auther_from_session(request)
     # best-effort refresh if needed, so dependent handlers always have a fresh token
     if auther.tokens.is_expiring(slack=30):
@@ -312,15 +362,18 @@ async def index(request: Request, auther: AuthorizationCodeAuth = Depends(requir
                 STATE["entities"] = await client.entities_with_files()
         except Exception as e:
             discovery_error = f"{type(e).__name__}: {e}"
+    username = request.session.get("username", "user")
+    my_runs = {rid: r for rid, r in STATE["runs"].items() if r.user == username}
     return templates.TemplateResponse(
         request,
         "index.html",
         {
             "entities": STATE["entities"],
-            "runs": STATE["runs"],
-            "username": request.session.get("username", "user"),
+            "runs": my_runs,
+            "username": username,
             "discovery_error": discovery_error,
             "endpoint": _cfg().endpoint,
+            "csrf_token": _csrf_token(request),
         },
     )
 
@@ -338,6 +391,7 @@ async def job_form(request: Request, _: Any = Depends(require_auth)) -> HTMLResp
             ),
             "username": request.session.get("username", "user"),
             "fs_browser": _fs_browser_enabled(),
+            "csrf_token": _csrf_token(request),
         },
     )
 
@@ -364,6 +418,7 @@ async def job_run(
     match_values: str = Form(""),
     force: bool = Form(False),
     auther: AuthorizationCodeAuth = Depends(require_auth),
+    _csrf: None = Depends(require_csrf),
 ) -> Any:
     cfg = _cfg()
 
@@ -444,7 +499,9 @@ async def job_run(
 @app.get("/run/{run_id}", response_class=HTMLResponse)
 async def run_page(request: Request, run_id: str, _: Any = Depends(require_auth)) -> HTMLResponse:
     state = STATE["runs"].get(run_id)
-    if not state:
+    username = request.session.get("username", "user")
+    # Hide existence from users who don't own the run — same 404 as a missing run.
+    if not state or state.user != username:
         raise HTTPException(404)
     return templates.TemplateResponse(
         request,
@@ -452,24 +509,30 @@ async def run_page(request: Request, run_id: str, _: Any = Depends(require_auth)
         {
             "run_id": run_id,
             "state": state,
-            "username": request.session.get("username", "user"),
+            "username": username,
         },
     )
 
 
 @app.websocket("/ws/run/{run_id}")
 async def run_ws(ws: WebSocket, run_id: str) -> None:
-    # Gate on a logged-in session: if there's no username in the session,
-    # the websocket handshake is refused.
-    if not ws.session.get("tokens"):
+    # Gate on a logged-in session AND on ownership of this specific run. The
+    # HTTP idle check runs in require_auth; mirror the age check here so a long-
+    # lived WS can't outlive the user's session.
+    sess = ws.session
+    if not sess.get("tokens"):
         await ws.close(code=4401)
         return
-    await ws.accept()
-    state = STATE["runs"].get(run_id)
-    if not state:
-        await ws.send_json({"error": "no such run"})
-        await ws.close()
+    last = sess.get("last_activity")
+    if last is not None and time.time() - float(last) > IDLE_SECONDS:
+        await ws.close(code=4401)
         return
+    username = sess.get("username", "user")
+    state = STATE["runs"].get(run_id)
+    if not state or state.user != username:
+        await ws.close(code=4404)
+        return
+    await ws.accept()
     q: asyncio.Queue = asyncio.Queue()
     state.subscribers.append(q)
     try:
@@ -506,6 +569,7 @@ async def api_match_preview(
     match_values: str = Form(""),
     filter: str = Form(""),
     _: Any = Depends(require_auth),
+    _csrf: None = Depends(require_csrf),
 ) -> HTMLResponse:
     """Render a preview of what a match-list filter would look like."""
     raw = _parse_values_blob(match_values)
@@ -534,7 +598,10 @@ async def api_match_preview(
 
 
 @app.post("/api/entities/refresh")
-async def api_entities_refresh(auther: AuthorizationCodeAuth = Depends(require_auth)) -> dict[str, Any]:
+async def api_entities_refresh(
+    auther: AuthorizationCodeAuth = Depends(require_auth),
+    _csrf: None = Depends(require_csrf),
+) -> dict[str, Any]:
     cfg = _cfg()
     async with AcumaticaClient(cfg.base_url, cfg.endpoint, auther) as client:
         STATE["swagger"] = await client.swagger()
@@ -570,11 +637,44 @@ def _fs_browser_enabled() -> bool:
     return os.environ.get("ATTDOWN_FS_BROWSER", "on").lower() not in {"off", "false", "0", "no"}
 
 
+def _render_fs_list(request: Request, target: Path, error: str | None = None) -> HTMLResponse:
+    if not target.is_dir():
+        return HTMLResponse(
+            f'<div class="text-red-700 text-xs">Not a directory: {target}</div>'
+        )
+    entries: list[Path] = []
+    try:
+        for e in target.iterdir():
+            if e.is_dir() and not e.name.startswith("."):
+                entries.append(e)
+    except PermissionError:
+        return HTMLResponse(
+            f'<div class="text-amber-700 text-xs">Permission denied: {target}</div>'
+        )
+    entries.sort(key=lambda e: e.name.lower())
+    parent = str(target.parent) if target.parent != target else None
+    return templates.TemplateResponse(
+        request, "_fs_list.html",
+        {"path": str(target), "entries": entries, "parent": parent, "error": error,
+         "csrf_token": _csrf_token(request)},
+    )
+
+
+def _resolve_browse_target(path: str) -> Path:
+    target = Path(path).expanduser() if path else _fallback_browse_dir()
+    try:
+        target = target.resolve()
+    except Exception:
+        target = _fallback_browse_dir()
+    if not target.is_dir():
+        target = _fallback_browse_dir()
+    return target
+
+
 @app.get("/api/fs/list", response_class=HTMLResponse)
 async def api_fs_list(
     request: Request,
     path: str = "",
-    mkdir: str = "",
     _: Any = Depends(require_auth),
 ) -> HTMLResponse:
     """Return a partial that lists subdirectories of `path` for the folder picker."""
@@ -587,53 +687,32 @@ async def api_fs_list(
             '</div>',
             status_code=403,
         )
-    target = Path(path).expanduser() if path else _fallback_browse_dir()
-    try:
-        target = target.resolve()
-    except Exception:
-        target = _fallback_browse_dir()
+    return _render_fs_list(request, _resolve_browse_target(path))
 
-    # If the path the user came from doesn't exist (e.g. "/data" on a Mac),
-    # fall back to a real directory instead of throwing an error.
-    if not target.is_dir():
-        target = _fallback_browse_dir()
 
-    # Optional: create a new subfolder and immediately navigate into it.
-    if mkdir:
-        safe = mkdir.strip().replace("/", "").replace("\\", "")
-        if safe and not safe.startswith("."):
-            new_path = target / safe
-            try:
-                new_path.mkdir(parents=False, exist_ok=True)
-                target = new_path.resolve()
-            except Exception as e:
-                return templates.TemplateResponse(
-                    request, "_fs_list.html",
-                    {"path": str(target), "entries": [], "parent": None,
-                     "error": f"Could not create folder: {e}"},
-                )
-
-    if not target.is_dir():
-        return HTMLResponse(
-            f'<div class="text-red-700 text-xs">Not a directory: {target}</div>'
-        )
-
-    entries: list[Path] = []
-    try:
-        for e in target.iterdir():
-            if e.is_dir() and not e.name.startswith("."):
-                entries.append(e)
-    except PermissionError:
-        return HTMLResponse(
-            f'<div class="text-amber-700 text-xs">Permission denied: {target}</div>'
-        )
-    entries.sort(key=lambda e: e.name.lower())
-
-    parent = str(target.parent) if target.parent != target else None
-    return templates.TemplateResponse(
-        request, "_fs_list.html",
-        {"path": str(target), "entries": entries, "parent": parent, "error": None},
-    )
+@app.post("/api/fs/mkdir", response_class=HTMLResponse)
+async def api_fs_mkdir(
+    request: Request,
+    path: str = Form(""),
+    mkdir: str = Form(""),
+    _: Any = Depends(require_auth),
+    _csrf: None = Depends(require_csrf),
+) -> HTMLResponse:
+    """Create a subfolder under `path` and re-render the folder list.
+    State-changing — requires CSRF. Kept separate from /api/fs/list so listing
+    stays a safe GET."""
+    if not _fs_browser_enabled():
+        raise HTTPException(status_code=403, detail="Folder browser disabled.")
+    target = _resolve_browse_target(path)
+    safe = mkdir.strip().replace("/", "").replace("\\", "")
+    if safe and not safe.startswith("."):
+        new_path = target / safe
+        try:
+            new_path.mkdir(parents=False, exist_ok=True)
+            target = new_path.resolve()
+        except Exception as e:
+            return _render_fs_list(request, target, error=f"Could not create folder: {e}")
+    return _render_fs_list(request, target)
 
 
 @app.get("/api/fields", response_class=HTMLResponse)
