@@ -4,6 +4,34 @@ All notable changes to AttDown4Acumatica are tracked here. Format is loosely
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project follows
 semver.
 
+## [0.2.1] — 2026-04-22
+
+Usability release for non-technical users on the prebuilt binary path.
+
+### Added
+
+- **`attdown gen-secret` subcommand.** Prints a single
+  `SESSION_SECRET=<token>` line suitable for pasting into `.env`. Lets
+  binary-only users generate a session secret without having Python
+  installed.
+- **Binary-first Quick Start** in the README. Per-OS step-by-step using
+  the real release filenames (`attdown-macos-arm64`,
+  `attdown-linux-x64`, `attdown-windows-x64.exe`). Source/Docker/headless
+  paths are now clearly marked as "advanced".
+
+### Fixed
+
+- `docs/install.md` no longer lists `attdown-macos-x64` (dropped from
+  the release matrix in v0.1.0's cycle when `macos-13` runners began
+  being decommissioned). Intel Macs are pointed at Rosetta + the arm64
+  binary.
+
+### CI
+
+- Bumped workflow actions to Node 24–compatible majors: `checkout@v6`,
+  `setup-python@v6`, `upload-artifact@v7`, `download-artifact@v8`,
+  `docker/build-push-action@v7`, `softprops/action-gh-release@v3`.
+
 ## [0.2.0] — 2026-04-22
 
 Security release. The web UI is hardened for its intended local-first
@@ -68,5 +96,6 @@ Initial release.
   published to GitHub Releases.
 - Docker image published to GHCR.
 
+[0.2.1]: https://github.com/hallboys/AttDown4Acumatica/releases/tag/v0.2.1
 [0.2.0]: https://github.com/hallboys/AttDown4Acumatica/releases/tag/v0.2.0
 [0.1.0]: https://github.com/hallboys/AttDown4Acumatica/releases/tag/v0.1.0
